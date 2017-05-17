@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Usage: {script} [ OPTIONS ] TARGET BUILD
 # 
-#   TARGET        Default target is "/usr/local".
-#   BUILD         If not defined tries to get the build into the Sublime Text 3 website.
+#   TARGET        Installation target. Default target is "/opt".
+#   BUILD         Build number, e.g. 3126. If not defined uses a Sublime Text 3 web service to retrieve the latest stable or dev version number.
 # 
 # OPTIONS
 #
 #   -h, --help    Displays this help message.
 #   -d, --dev     Install the dev version
-#   -s, --stable  Install the stable version
+#   -s, --stable  Install the stable version (default)
 #
-# Based on a script by Henrique Moody
 # Report bugs to Rudolf Bargholz <rudolf@bargholz.ch>
+
+# Based on a script by Henrique Moody
+# https://gist.github.com/henriquemoody/3288681
 
 # set -e
 
@@ -23,7 +25,7 @@ if [[ "${1}" = '-h' ]] || [[ "${1}" = '--help' ]]; then
 fi
 
 # Echo shell commands as they are executed. Expands variables and prints a little + sign before the line.
-set -x
+# set -x
 
 # ------------------------------------------------
 # ------------------------------------------------
@@ -102,15 +104,28 @@ declare PARAM_TARGET=""
 declare TARGET="${1:-/opt}"
 declare BUILD="${2}"
 declare BITS
-declare DEVSTABLE="stable"
+declare DEV_OR_STABLE="stable"
 declare JSON
 
 declare CURRENT_SUBL_LINK=""
 declare CURRENT_SUBL_EXECUTABLE=""
 declare CURRENT_SUBL_FOLDER=""
 
-declare STDESKTOP="/usr/share/applications/sublime_text.desktop"
-declare STTARGET=""
+declare TEMPDIRECTORY=""
+declare CWD=$(pwd)
+declare SUBL_DESKTOP_FILE="/usr/share/applications/sublime_text.desktop"
+declare SUBL_TARGET_FOLDER=""
+
+# Set empty to prevent debug echo information, or "debug" to display the debug info.
+declare DEBUG_ECHO=""
+
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+    echo TARGET=$TARGET
+    echo BUILD=$BUILD
+    echo DEV_OR_STABLE=$DEV_OR_STABLE
+    echo CWD=$CWD
+    echo ...
+fi
 
 # ------------------------------------------------
 # ------------------------------------------------
@@ -118,18 +133,18 @@ declare STTARGET=""
 # ------------------------------------------------
 
 if [[ "${1}" = '-d' ]] || [[ "${1}" = '--dev' ]]; then
-    DEVSTABLE="dev"
-    TARGET="${2:-/usr/local}"
+    DEV_OR_STABLE="dev"
+    TARGET="${2:-/opt}"
     PARAM_TARGET="${2}"
     BUILD="${3}"
 else
     if [[ "${1}" = '-s' ]] || [[ "${1}" = '--stable' ]]; then
-        DEVSTABLE="stable"
+        DEV_OR_STABLE="stable"
         TARGET="${2:-/opt}"
         PARAM_TARGET="${2}"
         BUILD="${3}"
     else
-        DEVSTABLE="stable"
+        DEV_OR_STABLE="stable"
         TARGET="${1:-/opt}"
         PARAM_TARGET="${1}"
         BUILD="${2}"
@@ -143,42 +158,67 @@ else
 fi
 
 if [[ -z "${BUILD}" ]]; then
-    VERSIONURL=$(printf "${VERSIONURL_FORMAT}" "${DEVSTABLE}" "${BITS}")
+    VERSIONURL=$(printf "${VERSIONURL_FORMAT}" "${DEV_OR_STABLE}" "${BITS}")
     JSON=$(wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 20 -O - ${VERSIONURL})
     BUILD=$(echo ${JSON} | grep -Po '"latest_version": \K[0-9]+')
 fi
 
 URL=$(printf "${URL_FORMAT}" "${BUILD}" "${BITS}")
 
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+    echo DEV_OR_STABLE=$DEV_OR_STABLE
+    echo TARGET=$TARGET
+    echo PARAM_TARGET=$PARAM_TARGET
+    echo BUILD=$BUILD
+    echo BITS=$BITS
+    echo VERSIONURL=$VERSIONURL
+    echo JSON=$JSON
+    echo CWD=$CWD
+    echo ...
+fi
+
 # ------------------------------------------------
 # ------------------------------------------------
 # --- Check to see if Sublime Text is installed already
 # ------------------------------------------------
 
+# If Sublime Text 3 is installed, entering subl in a script will open Sublime Text.
+# I can use this to find the location of the subl command, and then
+# determine the file that this links to. If the user has not specified a new install path
+# then I can install into the already specified folder.
+
 CURRENT_SUBL_LINK=$(type -p subl)
 if [ ! -z "$CURRENT_SUBL_LINK" ]; then
-  # Sublime Text is already installed
-  # The value of $CURRENT_SUBL_LINK is not empty
+  echo Sublime Text is already installed
+  # The value of $CURRENT_SUBL_LINK is NOT empty
   CURRENT_SUBL_EXECUTABLE=$(readlink -f ${CURRENT_SUBL_LINK})
   CURRENT_SUBL_FOLDER=$(dirname "$CURRENT_SUBL_EXECUTABLE")
 else
-  # Sublime Text is NOT installed
+  echo Sublime Text is NOT installed
   # CURRENT_SUBL_FOLDER=/opt
 fi
 
-echo CURRENT_SUBL_LINK=$CURRENT_SUBL_LINK
-echo CURRENT_SUBL_EXECUTABLE=$CURRENT_SUBL_EXECUTABLE
-echo CURRENT_SUBL_FOLDER=$CURRENT_SUBL_FOLDER
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+    echo CURRENT_SUBL_LINK=$CURRENT_SUBL_LINK
+    echo CURRENT_SUBL_EXECUTABLE=$CURRENT_SUBL_EXECUTABLE
+    echo CURRENT_SUBL_FOLDER=$CURRENT_SUBL_FOLDER
+    echo ...
+fi
 
 # Remove last directory from a string
 # a="/dir1/dir2/dir3/dir4"
 # echo ${a%/*}
-# If the current install path is "/opt/sublime_text", then I need just the "/opt"
+# If the current install path is "/opt/sublime_text", then I need just the "/opt" as the TARGET.
 
 if [ -z "$PARAM_TARGET" ]; then
     if [ ! -z "$CURRENT_SUBL_FOLDER" ]; then
         TARGET="${CURRENT_SUBL_FOLDER%/*}"
     fi
+fi
+
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+  echo TARGET=$TARGET
+  echo ...
 fi
 
 # ------------------------------------------------
@@ -193,34 +233,90 @@ if [[ "${CONFIRM}" = 'N' ]] || [[ "${CONFIRM}" = 'NO' ]]; then
     exit
 fi
 
-
-
 # ------------------------------------------------
 # ------------------------------------------------
 # --- Download, and extract in folder 
 # ------------------------------------------------
 
-STTARGET="/opt/sublime_text"
-
-if [ -f "sublime_text_3_build_3126_x64.tar.bz2" ]; then
-    rm "sublime_text_3_build_3126_x64.tar.bz2"
+SUBL_TARGET_FOLDER="${TARGET}/sublime_text"
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+    echo SUBL_TARGET_FOLDER=$SUBL_TARGET_FOLDER
+    echo ...
 fi
 
-if [ ! -d "sublime_text_3" ]; then
-  rm -r "sublime_text_3"
+
+# Create a dynamic temporary directory and download the files into this directory.
+# This directory is cleared when rebooting Linux.
+TEMPDIRECTORY=$(mktemp --directory)
+
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+    echo TEMPDIRECTORY=$TEMPDIRECTORY
+    echo ...
 fi
 
-if [ -f "$STDESKTOP" ]; then
-    sudo rm "$STDESKTOP"
+cd "$TEMPDIRECTORY"
+
+# curl -LO https://download.sublimetext.com/sublime_text_3_build_3126_x64.tar.bz2
+# tar xvjf sublime_text_3_build_3126_x64.tar.bz2
+
+echo "Downloading Sublime Text 3 ..."
+curl -L "${URL}" | tar -xjC ${TEMPDIRECTORY}
+
+if [ -f "$SUBL_DESKTOP_FILE" ]; then
+    sudo rm "$SUBL_DESKTOP_FILE"
 fi
 
-if [ -f "$STTARGET" ]; then
-    sudo rm -r "$STTARGET"
+sudo cp -rf "sublime_text_3/sublime_text.desktop" "$SUBL_DESKTOP_FILE"
+
+# Replace values in the sublime_text.desktop file to reference the installation folder TARGET
+iniset $SUBL_DESKTOP_FILE "Desktop Entry" "Exec" "${SUBL_TARGET_FOLDER}/sublime_text %F"
+iniset $SUBL_DESKTOP_FILE "Desktop Entry" "Icon" "${SUBL_TARGET_FOLDER}/Icon/128x128/sublime-text.png"
+iniset $SUBL_DESKTOP_FILE "Desktop Action Window" "Exec" "${SUBL_TARGET_FOLDER}/sublime_text -n"
+iniset $SUBL_DESKTOP_FILE "Desktop Action Document" "Exec" "${SUBL_TARGET_FOLDER}/sublime_text --command new_file"
+
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+    echo Contents of ${SUBL_DESKTOP_FILE}:
+    cat "$SUBL_DESKTOP_FILE"
+fi
+
+if [ -d "$CURRENT_SUBL_FOLDER" ]; then
+    sudo rm -r "$CURRENT_SUBL_FOLDER"
+fi
+
+if [ -d "$SUBL_TARGET_FOLDER" ]; then
+    sudo rm -r "$SUBL_TARGET_FOLDER"
+fi
+
+sudo mv sublime_text_3 "${SUBL_TARGET_FOLDER}"
+
+if [ -d "$TEMPDIRECTORY" ]; then
+    sudo rm -r "$TEMPDIRECTORY"
+fi
+
+if [ -f "/usr/bin/subl" ] || [ -L "/usr/bin/subl" ]; then
+    sudo rm "/usr/bin/subl"
+    if [ "${DEBUG_ECHO}" == "debug" ]; then
+        echo Removing symlink "/usr/bin/subl"
+    fi    
 fi
 
 if [ -f "/usr/bin/subl" ]; then
-    sudo rm /usr/bin/subl
+    echo symlink still exists
 fi
 
-echo "Downloading Sublime Text 3"
-curl -L "${URL}" | tar -xjC ${TARGET}
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+    echo Adding symlink "/usr/bin/subl"
+fi
+sudo ln -s "${SUBL_TARGET_FOLDER}/sublime_text" /usr/bin/subl
+
+cd "$CWD"
+if [ "${DEBUG_ECHO}" == "debug" ]; then
+    echo CWD=$CWD
+fi
+
+echo --------------------------------------------------------------
+echo "Finished installing!"
+echo "Type \"subl\" in the shell to open Sublime Text 3."
+echo "If you chose the dev version, you will need a serial number."
+echo --------------------------------------------------------------
+
