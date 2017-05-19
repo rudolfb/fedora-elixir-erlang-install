@@ -1,8 +1,8 @@
 # fedora-elixir-erlang-install
-Shell script to install Erlang, Elixir and Postgres
+Shell script to install Erlang, Elixir
 
 ```shell
 cd fedora-elixir-erlang-install
-chmod +x postgres.sh
-./postgres.sh
+chmod +x elixir-erlang.sh
+./elixir-erlang.sh
 ```
