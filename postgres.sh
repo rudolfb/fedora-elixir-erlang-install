@@ -11,5 +11,9 @@ sudo systemctl start postgresql
 sudo dnf install pgadmin3 -y
 
 sudo su - postgres
-psql -U postgres template1 -c "alter user postgres with password 'postgres';"
+PASSWD=$(psql -At -c "select passwd from pg_shadow where usename ='postgres'")
+if [[ -z "$PASSWD" ]]; then
+    psql -U postgres template1 -c "alter user postgres with password 'postgres';"
+fi
+
 exit
