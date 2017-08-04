@@ -18,7 +18,7 @@ asdf_install () {
 
 # Install prerequisites for Erlang
 sudo dnf upgrade -y
-sudo dnf install make automake gcc gcc-c++ kernel-devel git wget openssl-devel ncurses-devel wxBase3 wxGTK3-devel m4 nodejs inotify-tools -y
+sudo dnf install make automake gcc gcc-c++ kernel-devel git wget openssl-devel ncurses-devel wxBase3 wxGTK3-devel m4 nodejs inotify-tools fop -y
 
 git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.3.0
 
